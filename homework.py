@@ -1,4 +1,3 @@
-import datetime
 import logging
 import os
 import sys
@@ -13,11 +12,6 @@ from dotenv import load_dotenv
 from exceptions import EndpointError, HomeworkStatuseError
 
 logger = logging.getLogger(__name__)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler = StreamHandler(sys.stdout)
-logger.setLevel(logging.INFO)
-handler.setFormatter(formatter)
-logger.addHandler(handler)
 
 load_dotenv()
 
@@ -30,7 +24,7 @@ SECONDS_IN_MINUTE = 60
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
-HOMEWORK_STATUSES = {
+HOMEWORK_VERDICTS = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
     'reviewing': 'Работа взята на проверку ревьюером.',
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
@@ -45,17 +39,25 @@ KEY_CURRENT_DATE = 'current_date'
 def send_message(bot, message):
     """Отправляет сообщение в Telegram чат."""
     bot.send_message(TELEGRAM_CHAT_ID, message)
+    logger.info(f'Сообщение "{message}" отправлено.')
 
 
 def get_api_answer(current_timestamp):
     """Делает запрос к единственному эндпоинту API-сервиса."""
     timestamp = current_timestamp or int(time.time())
     params = {'from_date': timestamp}
-    response = requests.get(ENDPOINT, headers=HEADERS, params=params)
+    logger.info(f'Подключаемся к API: {ENDPOINT}.')
+    try:
+        response = requests.get(ENDPOINT, headers=HEADERS, params=params)
+    except ConnectionError as error:
+        logger.error(f'Ошибка {error} при подключения к API: {ENDPOINT}.')
+        raise ConnectionError
     if response.status_code != HTTPStatus.OK:
-        logging.error(
-            f'Сбой в работе программы: Эндпоинт {ENDPOINT} недоступен. '
-            f'Код ответа API: {response.status_code}'
+        logger.error(
+            f'Сбой в работе программы: Эндпоинт {ENDPOINT} недоступен.\n'
+            f'Код ответа API: {response.status_code}.\n'
+            f'Параметры запроса: {params}.\n'
+            f'Текст ответа API: {response.text}.'
         )
         raise EndpointError
     try:
@@ -67,17 +69,24 @@ def get_api_answer(current_timestamp):
 
 def check_response(response):
     """Проверяет ответ API на корректность."""
-    if type(response) is not dict:
+    logger.info(f'Проверяем ответ API: {ENDPOINT}')
+    if not isinstance(response, dict):
         logger.error('Тип данных ответа API должен быть словарь.')
         raise TypeError
     if KEY_HOMEWORKS not in response:
         logger.error(
-            f'Сбой в работе программы: Ключ словаря ответа API {KEY_HOMEWORKS}'
-            ' неверен.'
+            'Сбой в работе программы: Ключ словаря ответа API '
+            f' {KEY_HOMEWORKS} неверен.'
         )
         raise KeyError
     homeworks = response.get(KEY_HOMEWORKS)
-    if type(homeworks) is not list:
+    if KEY_CURRENT_DATE not in response:
+        logger.error(
+            'Сбой в работе программы: Ключ словаря ответа API '
+            f'{KEY_CURRENT_DATE} неверен.'
+        )
+        raise KeyError
+    if not isinstance(homeworks, list):
         logger.error(
             'Домашние работы в ответе API должны быть упакованы в список.'
         )
@@ -103,80 +112,62 @@ def parse_status(homework):
         raise KeyError
     homework_name = homework.get(KEY_HOMEWORK_NAME)
     homework_status = homework.get(KEY_STATUS)
-    if homework_status not in HOMEWORK_STATUSES:
+    if homework_status not in HOMEWORK_VERDICTS:
         logger.error(
             'Сбой в работе программы: в ответе API обнаружен '
             'недокументированный статус домашней работы.'
         )
         raise HomeworkStatuseError
-    verdict = HOMEWORK_STATUSES.get(homework_status)
+    verdict = HOMEWORK_VERDICTS.get(homework_status)
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def check_tokens():
     """Проверяет доступность переменных окружения."""
-    if PRACTICUM_TOKEN is None:
-        logger.critical(
-            'Отсутствует обязательная переменная окружения: '
-            '"PRACTICUM_TOKEN".\n'
-            'Программа принудительно остановлена.'
-        )
-        return False
-    elif TELEGRAM_TOKEN is None:
-        logger.critical(
-            'Отсутствует обязательная переменная окружения: '
-            '"TELEGRAM_TOKEN".\n'
-            'Программа принудительно остановлена.'
-        )
-        return False
-    elif TELEGRAM_CHAT_ID is None:
-        logger.critical(
-            'Отсутствует обязательная переменная окружения: '
-            '"TELEGRAM_CHAT_ID".\n'
-            'Программа принудительно остановлена.'
-        )
-        return False
-    return True
+    if all([PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]):
+        return True
 
 
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
+        logger.critical(
+            'Отсутствует обязательная переменная окружения!\n'
+            'Программа принудительно остановлена.'
+        )
         exit()
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    # current_timestamp = int(time.time())
-    date = datetime.date(2022, 3, 1)
-    current_timestamp = int(time.mktime(date.timetuple()))
+    current_timestamp = int(time.time())
     LAST_ERROR_MESSAGE = ''
 
     while True:
         try:
             response = get_api_answer(current_timestamp)
             homeworks = check_response(response)
-            if homeworks == []:
+            if not homeworks:
                 logger.info('Обновлений нет')
             else:
                 for homework in homeworks:
                     message = parse_status(homework)
                     send_message(bot, message)
-                    logger.info(f'Сообщение "{message}" отправлено')
-            if KEY_CURRENT_DATE not in response:
-                logger.error(
-                    'Сбой в работе программы: Ключ словаря ответа API '
-                    f'{KEY_CURRENT_DATE} неверен.'
-                )
-                raise KeyError
             current_timestamp = response.get(KEY_CURRENT_DATE)
-            time.sleep(RETRY_TIME)
         except Exception as error:
-            message = f'Сбой в работе программы: {error}'
-            if message != LAST_ERROR_MESSAGE:
-                send_message(bot, message)
-                LAST_ERROR_MESSAGE = message
-            logger.error(f'Сбой в работе программы: {error}')
-            time.sleep(RETRY_TIME)
+            error_message = f'Сбой в работе программы: {error}'
+            if error_message != LAST_ERROR_MESSAGE:
+                send_message(bot, error_message)
+                LAST_ERROR_MESSAGE = error_message
+            logger.error(error_message)
+        time.sleep(RETRY_TIME)
 
 
 if __name__ == '__main__':
+    formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - модуль: %(module)s - функция: '
+        '%(funcName)s - номер строки: %(lineno)d - %(message)s'
+    )
+    handler = StreamHandler(sys.stdout)
+    logger.setLevel(logging.INFO)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
     main()
