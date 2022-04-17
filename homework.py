@@ -98,6 +98,9 @@ def parse_status(homework):
     """Извлекает из ответа API информацию о конкретной домашней работе.
     И статус этой работы.
     """
+    if not isinstance(homework, dict):
+        logger.error('Тип данных информации о работе должен быть словарь.')
+        raise TypeError
     if KEY_HOMEWORK_NAME not in homework:
         logger.error(
             'Сбой в работе программы: Ключ словаря ответа API '
