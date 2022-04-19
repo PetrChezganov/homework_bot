@@ -31,9 +31,9 @@ HOMEWORK_VERDICTS = {
 }
 
 KEY_HOMEWORKS = 'homeworks'
+KEY_CURRENT_DATE = 'current_date'
 KEY_HOMEWORK_NAME = 'homework_name'
 KEY_STATUS = 'status'
-KEY_CURRENT_DATE = 'current_date'
 
 
 def send_message(bot, message):
