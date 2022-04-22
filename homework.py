@@ -38,8 +38,13 @@ KEY_STATUS = 'status'
 
 def send_message(bot, message):
     """Отправляет сообщение в Telegram чат."""
-    bot.send_message(TELEGRAM_CHAT_ID, message)
-    logger.info(f'Сообщение "{message}" отправлено.')
+    try:
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+        logger.info(f'Сообщение "{message}" отправлено.')
+    except telegram.TelegramError as error:
+        error_message = f'Сбой при отправке сообщения в telegram: {error}'
+        logger.error(error_message)
+        raise telegram.TelegramError
 
 
 def get_api_answer(current_timestamp):
@@ -69,7 +74,7 @@ def get_api_answer(current_timestamp):
 
 def check_response(response):
     """Проверяет ответ API на корректность."""
-    logger.info(f'Проверяем ответ API: {ENDPOINT}')
+    logger.info(f'Проверяем ответ API: {ENDPOINT}.')
     if not isinstance(response, dict):
         logger.error('Тип данных ответа API должен быть словарь.')
         raise TypeError
